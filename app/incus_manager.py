@@ -8,11 +8,20 @@ _logger = app_logging.get_logger("incus-manager")
 _url_base = "http+unix://%2Fvar%2Flib%2Fincus%2Funix.socket"
 requests_unixsocket.monkeypatch()
 
+def _handle_incus_error(response: requests.Response) -> requests.Response:
+    if 400 <= response.status_code < 600:
+        raise requests.HTTPError(
+            f"{response.status_code} error.",
+            response.reason,
+            str(response.content)
+        )
+    return response
+
 class IncusManager(ContainersManager):
     def __enter__(self):
-        _logger.info("Incus server version: %s", requests.get(
+        _logger.info("Incus server version: %s", _handle_incus_error(requests.get(
             f"{_url_base}/1.0"
-        ).json()["metadata"]["environment"]["server_version"])
+        )).json()["metadata"]["environment"]["server_version"])
         return self
     
     def __exit__(self, exc_type, exc_value, traceback):
@@ -35,10 +44,10 @@ class IncusSet(ContainersSet):
         return f"remote-{self._env.name}"
 
     def _get_containers(self) -> list[dict]:
-        containers = requests.get(
+        containers = _handle_incus_error(requests.get(
             f"{_url_base}/1.0/instances",
             params={"recursion": 1}
-        ).json()["metadata"]
+        )).json()["metadata"]
         assert isinstance(containers, list)
 
         filtered_containers = []
@@ -76,29 +85,32 @@ class IncusSet(ContainersSet):
             for container in containers:
                 container_name = container["name"]
                 _logger.info("Stopping %s", container_name)
-                requests.put(
+                _handle_incus_error(requests.put(
                     f"{_url_base}/1.0/instances/{container_name}/state",
                     json={
                         "action": "stop",
                         "force": True
                     }
-                ).raise_for_status()
+                ))
             
-            _logger.info("Waiting 10s for all containers to stop...")
-            time.sleep(10)
+            _logger.info("Waiting 5s for all containers to stop...")
+            time.sleep(5)
 
             for container in containers:
                 container_name = container["name"]
                 _logger.info("Removing %s", container_name)
-                requests.delete(
+                _handle_incus_error(requests.delete(
                     f"{_url_base}/1.0/instances/{container_name}"
-                ).raise_for_status()
+                ))
+            
+            _logger.info("Waiting 5s for all containers to be removed...")
+            time.sleep(5)
         
         for i in range(1, count+1):
             port = self._env.first_port + i
             name = f"{self._container_name_prefix}-{i}"
             _logger.info("Starting %s, listening on port %d", name, port)
-            response = requests.post(
+            _handle_incus_error(requests.post(
                 f"{_url_base}/1.0/instances",
                 json={
                     "name": name,
@@ -116,6 +128,9 @@ class IncusSet(ContainersSet):
                         }
                     }
                 }
-            ).raise_for_status()
+            ))
+
+        _logger.info("Waiting 10s for all containers to be started...")
+        time.sleep(10)
 
         return count
