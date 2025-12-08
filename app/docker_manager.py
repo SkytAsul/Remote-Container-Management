@@ -1,20 +1,25 @@
 from docker import DockerClient
 from docker.models.containers import Container
-from pydantic import BaseModel
+from containers_models import ContainerEnvironment, ContainersManager, ContainersSet, UnknownContainersCountException
 import app_logging
 
-_logger = app_logging.get_logger("containers-set")
+_logger = app_logging.get_logger("docker-manager")
 
-class ContainerEnvironment(BaseModel):
-    name: str
-    first_port: int
-    container_image: str
+class DockerManager(ContainersManager):
+    def __enter__(self):
+        self.docker_client = DockerClient.from_env()
+        _logger.info("Docker version: %s", self.docker_client.version())
+        return self
+    
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.docker_client.close()
 
-class UnknownContainersCountException(Exception):
-    pass
+    def crete_containers_set(self, env: ContainerEnvironment) -> 'DockerSet':
+        return DockerSet(env, self.docker_client)
 
-class ContainersSet():
+class DockerSet(ContainersSet):
     _env_label = "remotely-managed-env"
+    _img_name = "registry.reset.inso-w.at/2025ws-ase-pr-group/25ws-ase-pr-qse-09/test-host:alpine"
     
     def __init__(
             self,
@@ -27,7 +32,7 @@ class ContainersSet():
     @property
     def _filter(self):
         return {
-            "label": f"{ContainersSet._env_label}={self._env.name}"
+            "label": f"{DockerSet._env_label}={self._env.name}"
         };
     
     def get_running_count(self) -> int:
@@ -68,7 +73,7 @@ class ContainersSet():
             name = f"remote-{self._env.name}-{i}"
             _logger.info("Starting %s, listening on port %d", name, port)
             self._docker_client.containers.run(
-                self._env.container_image,
+                DockerSet._img_name,
                 restart_policy={
                     "Name": "always"
                 },
@@ -76,7 +81,7 @@ class ContainersSet():
                 name=name,
                 hostname=name,
                 labels={
-                    ContainersSet._env_label: self._env.name
+                    DockerSet._env_label: self._env.name
                 },
                 detach=True,
             )

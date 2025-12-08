@@ -1,30 +1,36 @@
 from fastapi import FastAPI, HTTPException
-import docker
 from contextlib import asynccontextmanager
 import app_logging
 from pydantic import BaseModel, Field
-from containers_set import ContainerEnvironment, ContainersSet, UnknownContainersCountException
+from containers_models import ContainerEnvironment, UnknownContainersCountException, ContainersManager
+import os
 
 logger = app_logging.get_logger("main")
 
-docker_client: docker.DockerClient
 environments: dict[str, ContainerEnvironment]
+containers_manager: ContainersManager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global docker_client, environments
-    docker_client = docker.from_env()
-    logger.info("Docker version: %s", docker_client.version())
+    global environments, containers_manager
 
-    img = "registry.reset.inso-w.at/2025ws-ase-pr-group/25ws-ase-pr-qse-09/test-host:alpine"
+    match os.getenv("CONTAINERS_TYPE", "docker"):
+        case "docker":
+            import docker_manager
+            containers_manager = docker_manager.DockerManager()
+        case "incus":
+            import incus_manager
+            containers_manager = incus_manager.IncusManager()
+        case x:
+            raise ValueError(f"Unknown containers type {x}")
+
     environments = {env.name: env for env in [
-        ContainerEnvironment(name="prod", first_port=2220, container_image=img),
-        ContainerEnvironment(name="test", first_port=3000, container_image=img),
+        ContainerEnvironment(name="prod", first_port=2220),
+        ContainerEnvironment(name="test", first_port=3000),
     ]}
 
-    yield
-
-    docker_client.close()
+    with containers_manager:
+        yield
 
 app = FastAPI(
     lifespan=lifespan,
@@ -38,7 +44,7 @@ class StatusResponse(BaseModel):
 def get_status():
     containers_count: dict[str, int] = {}
     for env in environments.values():
-        c_set = ContainersSet(env, docker_client)
+        c_set = containers_manager.crete_containers_set(env)
         count = c_set.get_running_count()
         containers_count[env.name] = count
     
@@ -60,7 +66,7 @@ def reset(request: ResetRequest) -> ResetResponse:
     if env is None:
         raise HTTPException(404, "Environment not found")
     
-    c_set = ContainersSet(env, docker_client)
+    c_set = containers_manager.crete_containers_set(env)
     try:
         started_count = c_set.reset(request.new_count)
     except UnknownContainersCountException:
