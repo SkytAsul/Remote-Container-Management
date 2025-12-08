@@ -22,8 +22,7 @@ class IncusManager(ContainersManager):
         return IncusSet(env)
 
 class IncusSet(ContainersSet):
-    _img_name = "local:ansible-debian-host"
-    _img_fingerprint = "aa97635bd0c3966293412f15a9e650166a2a19a63d60f335ee3753461343a1bf"
+    _img_alias = "ansible-debian-host"
     
     def __init__(
             self,
@@ -107,7 +106,7 @@ class IncusSet(ContainersSet):
                     "type": "container",
                     "source": {
                         "type": "image",
-                        "fingerprint": IncusSet._img_fingerprint
+                        "alias": IncusSet._img_alias
                     },
                     "devices": {
                         "ssh-access": {
