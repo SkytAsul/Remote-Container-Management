@@ -7,5 +7,6 @@ _handler = RichHandler()
 _handler.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
 _root_logger.addHandler(_handler)
 
+
 def get_logger(name: str):
     return _root_logger.getChild(name)
