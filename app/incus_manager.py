@@ -23,6 +23,21 @@ def _handle_incus_error(response: requests.Response) -> requests.Response:
     return response
 
 
+def _get_operation(response: requests.Response) -> str:
+    return response.json()["metadata"]["id"]
+
+
+def _wait_for_operations(operations: list[str]) -> None:
+    for operation in operations:
+        response = requests.get(f"{_url_base}/1.0/operations/{operation}/wait")
+        if 400 <= response.status_code < 600:
+            _logger.warning(
+                "An error occurred while waiting for an operation to finish: %s, %s",
+                response.reason,
+                str(response.content),
+            )
+
+
 class IncusManager(ContainersManager):
     def __enter__(self):
         _logger.info(
@@ -94,35 +109,41 @@ class IncusSet(ContainersSet):
             if count == 0:
                 raise UnknownContainersCountException()
 
+        operations: list[str]
         if len(containers) != 0:
+            operations = []
             for container in containers:
                 container_name = container["name"]
                 _logger.info("Stopping %s", container_name)
-                _handle_incus_error(
+                response = _handle_incus_error(
                     requests.put(
                         f"{_url_base}/1.0/instances/{container_name}/state",
                         json={"action": "stop", "force": True},
                     )
                 )
+                operations.append(_get_operation(response))
 
-            _logger.info("Waiting 5s for all containers to stop...")
-            time.sleep(5)
+            _logger.info("Waiting for all containers to stop...")
+            _wait_for_operations(operations)
 
+            operations = []
             for container in containers:
                 container_name = container["name"]
                 _logger.info("Removing %s", container_name)
-                _handle_incus_error(
+                response = _handle_incus_error(
                     requests.delete(f"{_url_base}/1.0/instances/{container_name}")
                 )
+                operations.append(_get_operation(response))
 
-            _logger.info("Waiting 5s for all containers to be removed...")
-            time.sleep(5)
+            _logger.info("Waiting for all containers to be removed...")
+            _wait_for_operations(operations)
 
+        operations = []
         for i in range(1, count + 1):
             port = self._env.first_port + i
             name = f"{self._container_name_prefix}-{i}"
             _logger.info("Starting %s, listening on port %d", name, port)
-            _handle_incus_error(
+            response = _handle_incus_error(
                 requests.post(
                     f"{_url_base}/1.0/instances",
                     json={
@@ -140,8 +161,9 @@ class IncusSet(ContainersSet):
                     },
                 )
             )
+            operations.append(_get_operation(response))
 
-        _logger.info("Waiting 10s for all containers to be started...")
-        time.sleep(10)
+        _logger.info("Waiting for all containers to be started...")
+        _wait_for_operations(operations)
 
         return count
