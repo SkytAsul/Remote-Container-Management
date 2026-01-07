@@ -56,7 +56,11 @@ class IncusManager(ContainersManager):
 
 
 class IncusSet(ContainersSet):
-    _img_alias = "ansible-debian-host"
+    _img_aliases = [
+        "ansible-debian/11",
+        "ansible-debian/12",
+        "ansible-debian/13",
+    ]
 
     def __init__(
         self,
@@ -142,7 +146,10 @@ class IncusSet(ContainersSet):
         for i in range(1, count + 1):
             port = self._env.first_port + i
             name = f"{self._container_name_prefix}-{i}"
-            _logger.info("Starting %s, listening on port %d", name, port)
+            image = IncusSet._img_aliases[i % len(IncusSet._img_aliases)]
+            _logger.info(
+                "Starting %s with image %s, listening on port %d", name, image, port
+            )
             response = _handle_incus_error(
                 requests.post(
                     f"{_url_base}/1.0/instances",
@@ -150,7 +157,7 @@ class IncusSet(ContainersSet):
                         "name": name,
                         "start": True,
                         "type": "container",
-                        "source": {"type": "image", "alias": IncusSet._img_alias},
+                        "source": {"type": "image", "alias": image},
                         "devices": {
                             "ssh-access": {
                                 "type": "proxy",
